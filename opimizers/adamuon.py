@@ -3,12 +3,17 @@ from torch import Tensor
 from .aux import zeropower_via_newtonschulz5, adam_update
 
 
-def adamuon_update(grad: Tensor, momentum: Tensor, variance: Tensor, beta: float = 0.95, ns_steps: int = 5, nesterov=True, eps: float = 1e-8):
+def adamuon_update(grad: Tensor, momentum: Tensor, variance: Tensor, beta: float = 0.95, ns_steps: int = 5, nesterov=True, eps: float = 1e-8, use_sign: bool = True):
     momentum.mul_(beta).add_(grad)
     update = grad.add(momentum, alpha=beta) if nesterov else momentum
     if update.ndim == 4:
         update = update.view(len(update), -1)
-    update = zeropower_via_newtonschulz5(torch.sign(update), steps=ns_steps)
+    # update = zeropower_via_newtonschulz5(torch.sign(update), steps=ns_steps)
+    if use_sign:
+        update = zeropower_via_newtonschulz5(
+            torch.sign(update), steps=ns_steps)
+    else:
+        update = zeropower_via_newtonschulz5(update, steps=ns_steps)
     variance.lerp_(update.square(), 1 - beta)
     update.div_(variance.view_as(update).sqrt() + eps)
     scale = 0.2 * (
@@ -27,6 +32,7 @@ class AdaMuon(torch.optim.Optimizer):
                 group['momentum'] = group.get('momentum', 0.95)
                 group['weight_decay'] = group.get('weight_decay', 0)
                 group['eps'] = group.get('eps', 1e-8)
+                group['use_sign'] = group.get('use_sign', True)
             else:
                 group['lr'] = group.get('lr', 3e-4)
                 group['betas'] = group.get('betas', (0.9, 0.95))
@@ -57,7 +63,7 @@ class AdaMuon(torch.optim.Optimizer):
                         state['variance'] = torch.zeros(
                             var_shape, device=p.device, dtype=p.dtype)
                     update = adamuon_update(
-                        p.grad, state['momentum'], state['variance'], beta=group['momentum'])
+                        p.grad, state['momentum'], state['variance'], beta=group['momentum'], use_sign=group['use_sign'])
                     p.mul_(1 - group['lr'] * group['weight_decay'])
                     p.add_(update.reshape(p.shape), alpha=-group['lr'])
 
